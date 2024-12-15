@@ -2,6 +2,7 @@
 """
 @author: Antoine Guillaume
 """
+import numpy as np
 from numpy.random import choice, uniform, random, seed
 from numpy import (
     unique, where, percentile, int64, bool_, float64, concatenate,
@@ -162,113 +163,72 @@ def M_SL_generate_shapelet(
     M_SL_init_random_shapelet_params(
         n_shapelets, shapelet_sizes, n_timestamps, p_norm, max_channels, prime_scheme
     )
-    #Initialize self similarity mask
+    
+    # **id_sample 저장용 배열 추가**
+    id_samples = np.zeros(n_shapelets, dtype=np.int64)
+    
     unique_dil = unique(dilations)
-    mask_sampling = ones(
-        (2,unique_dil.shape[0],n_samples,n_features,n_timestamps), dtype=bool_
-    )
+    mask_sampling = ones((2, unique_dil.shape[0], n_samples, n_features, n_timestamps), dtype=bool_)
     mask_return = ones(n_shapelets, dtype=bool_)
-    #values[idx_val[i]:idx_val[i+1]]=_val
-    a1 = concatenate((zeros(1, dtype=int64),cumsum(n_channels*lengths)))
-    #same for channels
-    a2 = concatenate((zeros(1, dtype=int64),cumsum(n_channels)))   
 
-    #For each dilation, we can do in parallel
+    a1 = concatenate((zeros(1, dtype=int64), cumsum(n_channels * lengths)))
+    a2 = concatenate((zeros(1, dtype=int64), cumsum(n_channels)))
+
     for i_d in prange(unique_dil.shape[0]):
-        #For each shapelet id with this dilation
-        id_shps = where(dilations==unique_dil[i_d])[0]
+        id_shps = where(dilations == unique_dil[i_d])[0]
         min_l = min(lengths[id_shps])
+        
         for i_shp in id_shps:
             _dilation = dilations[i_shp]
             _length = lengths[i_shp]
             norm = int64(normalize[i_shp])
             _n_channels = n_channels[i_shp]
+
             if use_phase:
                 d_shape = n_timestamps
             else:
-                d_shape = n_timestamps-(_length-1)*_dilation
-            mask_dil = mask_sampling[norm,i_d]
-            
-            #Possible sampling points given self similarity mask
-            
-            _values = zeros(_n_channels * _length)
-            
-            _channel_ids = choice(
-                arange(0, n_features), _n_channels, replace=False
-            )
-            
-            i_mask = where(
-                mask_dil[:,_channel_ids,:d_shape].sum(axis=1)>=_n_channels*alpha
-            )
-            
+                d_shape = n_timestamps - (_length - 1) * _dilation
+
+            mask_dil = mask_sampling[norm, i_d]
+
+            # **가능한 sampling 포인트 선택**
+            i_mask = where(mask_dil[:, :, :d_shape].sum(axis=1) >= _n_channels * alpha)
+
             if i_mask[0].shape[0] > 0:
                 x_dist = zeros(d_shape)
-                #Choose a sample
-                id_sample = choice(i_mask[0])
-                #Choose a timestamp
-                index = choice(i_mask[1][i_mask[0]==id_sample])
-                #Counter to keep track of indexes for value affectation
+                
+                # **수정된 부분: shapelet이 선택된 instance (id_sample) 기록**
+                id_sample = choice(i_mask[0])  # 선택된 샘플
+                id_samples[i_shp] = id_sample  # 기록
+
+                index = choice(i_mask[1][i_mask[0] == id_sample])
+
+                _values = zeros(_n_channels * _length)
+                _channel_ids = choice(arange(0, n_features), _n_channels, replace=False)
                 a3 = 0
                 
-                #Select another sample of the same class as the sample used
-                loc_others = where(y == y[id_sample])[0]
-                if loc_others.shape[0] > 1:
-                    loc_others = loc_others[loc_others != id_sample]
-                    id_test = choice(loc_others)
-                else:
-                    id_test = id_sample
-                
-                #Update the mask
-                alpha_size = _length - int64(max(1,(1-alpha)*min_l))
                 for k in range(_n_channels):
-                    for j in range(alpha_size):
-                        #We can use modulo even without phase invariance, as we
-                        #limit the sampling to d_shape
-                        mask_sampling[
-                            norm, i_d, id_sample, _channel_ids[k],
-                            (index-(j*_dilation))%n_timestamps
-                        ] = False
-                        mask_sampling[
-                            norm, i_d, id_sample, _channel_ids[k],
-                            (index+(j*_dilation))%n_timestamps
-                        ] = False
-                    
                     b3 = a3 + _length
-                    #Extract the values
                     _v = get_subsequence(
-                        X[id_sample, _channel_ids[k]], index, _length,
-                        _dilation, norm, use_phase
+                        X[id_sample, _channel_ids[k]], index, _length, _dilation, norm, use_phase
                     )
-                    
-                    #Compute distance vector
-                    x_dist += compute_shapelet_dist_vector(
-                        X[id_test, _channel_ids[k]], _v, _length, _dilation,
-                        norm, use_phase
-                    )
-                    
                     _values[a3:b3] = _v
                     a3 = b3
-                
+
                 values[a1[i_shp]:a1[i_shp+1]] = _values
                 channel_ids[a2[i_shp]:a2[i_shp+1]] = _channel_ids
-                
-                #Extract value between two percentile as threshold for SO
-                ps = percentile(x_dist, [p_min,p_max])
-                threshold[i_shp] = uniform(
-                    ps[0], ps[1]
-                )
+
+                ps = percentile(x_dist, [p_min, p_max])
+                threshold[i_shp] = uniform(ps[0], ps[1])
             else:
                 mask_return[i_shp] = False
-            
+
     lengths = lengths[mask_return]
     n_channels = n_channels[mask_return]
     mask_channel_ids = zeros(n_channels.sum(), dtype=int64)
-    mask_values = zeros(
-        int64(
-            dot(lengths.astype(float64), n_channels.astype(float64))
-        )
-    )
-    
+    mask_values = zeros(int64(dot(lengths.astype(float64), n_channels.astype(float64))))
+    mask_id_samples = id_samples[mask_return]  # **mask 적용 후 id_samples**
+
     c1 = 0
     c2 = 0
     for idx, i_shp in enumerate(where(mask_return)[0]):        
@@ -288,7 +248,8 @@ def M_SL_generate_shapelet(
         threshold[mask_return],
         normalize[mask_return],
         n_channels,
-        mask_channel_ids
+        mask_channel_ids,
+        mask_id_samples  # **id_sample 추가**
     )
 
 @njit(cache=__USE_NUMBA_CACHE__, parallel=__USE_NUMBA_PARALLEL__, fastmath=__USE_NUMBA_FASTMATH__, nogil=__USE_NUMBA_NOGIL__)
