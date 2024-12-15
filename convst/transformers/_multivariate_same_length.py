@@ -109,64 +109,19 @@ def M_SL_generate_shapelet(
     use_phase, max_channels, prime_scheme
 ):
     """
-    Given a time series dataset and parameters of the method, generate the
-    set of random shapelet that will be used in the rest of the algorithm.
-
-    Parameters
-    ----------
-    X : array, shape=(n_samples, n_features, n_timestamps)
-        Time series dataset
-    y : array, shape=(n_samples)
-        Class of each input time series
-    n_shapelets : int
-        Number of shapelet to generate
-    shapelet_sizes : array, shape=()
-        An array of possible shapelet length.
-    seed : int
-        Random seed generator for numpy
-    p_norm : float
-        Probability of each shapelet to use z-normalized distance
-    p_min : float
-        Lower bound for the percentile during the choice of threshold
-    p_max : float
-        Upper bound for the percentile during the choice of threshold
-    alpha : float
-        Alpha similarity parameter
-    use_phase: bool
-        Wheter to use phase invariance
-    prime_scheme : bool
-        Wheter to only consider prime numbers as possible dilation 
-
-    
-    Returns
-    -------
-    set of array, shape=(5)
-        values : array, shape=(n_shapelets, max(shapelet_sizes))
-            Values of the shapelets. If the shapelet use z-normalized distance,
-            those values are already z-normalized by the shapelet 
-            initialization step.
-        lengths : array, shape=(n_shapelets)
-            Length parameter of the shapelets
-        dilations : array, shape=(n_shapelets)
-            Dilation parameter of the shapelets
-        threshold : array, shape=(n_shapelets)
-            Threshold parameter of the shapelets
-        normalize : array, shape=(n_shapelets)
-            Normalization indicator of the shapelets
+    Generate shapelets and record which instance (id_samples) each shapelet comes from.
     """
     n_samples, n_features, n_timestamps = X.shape
-    # Fix the random seed
     seed(r_seed)
 
-    #Initialize shapelets
+    # Shapelet initialization
     values, lengths, dilations, threshold, normalize, n_channels, channel_ids = \
-    M_SL_init_random_shapelet_params(
-        n_shapelets, shapelet_sizes, n_timestamps, p_norm, max_channels, prime_scheme
-    )
+        M_SL_init_random_shapelet_params(
+            n_shapelets, shapelet_sizes, n_timestamps, p_norm, max_channels, prime_scheme
+        )
     
-    # **id_sample 저장용 배열 추가**
-    id_samples = np.zeros(n_shapelets, dtype=np.int64)
-    
+    id_samples = np.zeros(n_shapelets, dtype=np.int64)  # Shapelet 생성 시 instance 기록
+
     unique_dil = unique(dilations)
     mask_sampling = ones((2, unique_dil.shape[0], n_samples, n_features, n_timestamps), dtype=bool_)
     mask_return = ones(n_shapelets, dtype=bool_)
@@ -176,37 +131,26 @@ def M_SL_generate_shapelet(
 
     for i_d in prange(unique_dil.shape[0]):
         id_shps = where(dilations == unique_dil[i_d])[0]
-        min_l = min(lengths[id_shps])
-        
+
         for i_shp in id_shps:
             _dilation = dilations[i_shp]
             _length = lengths[i_shp]
             norm = int64(normalize[i_shp])
             _n_channels = n_channels[i_shp]
 
-            if use_phase:
-                d_shape = n_timestamps
-            else:
-                d_shape = n_timestamps - (_length - 1) * _dilation
-
+            d_shape = n_timestamps if use_phase else n_timestamps - (_length - 1) * _dilation
             mask_dil = mask_sampling[norm, i_d]
 
-            # **가능한 sampling 포인트 선택**
             i_mask = where(mask_dil[:, :, :d_shape].sum(axis=1) >= _n_channels * alpha)
-
             if i_mask[0].shape[0] > 0:
-                x_dist = zeros(d_shape)
-                
-                # **수정된 부분: shapelet이 선택된 instance (id_sample) 기록**
-                id_sample = choice(i_mask[0])  # 선택된 샘플
-                id_samples[i_shp] = id_sample  # 기록
+                id_sample = choice(i_mask[0])  # 선택된 샘플 기록
+                id_samples[i_shp] = id_sample
 
                 index = choice(i_mask[1][i_mask[0] == id_sample])
-
                 _values = zeros(_n_channels * _length)
                 _channel_ids = choice(arange(0, n_features), _n_channels, replace=False)
                 a3 = 0
-                
+
                 for k in range(_n_channels):
                     b3 = a3 + _length
                     _v = get_subsequence(
@@ -218,39 +162,11 @@ def M_SL_generate_shapelet(
                 values[a1[i_shp]:a1[i_shp+1]] = _values
                 channel_ids[a2[i_shp]:a2[i_shp+1]] = _channel_ids
 
-                ps = percentile(x_dist, [p_min, p_max])
-                threshold[i_shp] = uniform(ps[0], ps[1])
-            else:
-                mask_return[i_shp] = False
-
-    lengths = lengths[mask_return]
-    n_channels = n_channels[mask_return]
-    mask_channel_ids = zeros(n_channels.sum(), dtype=int64)
-    mask_values = zeros(int64(dot(lengths.astype(float64), n_channels.astype(float64))))
-    mask_id_samples = id_samples[mask_return]  # **mask 적용 후 id_samples**
-
-    c1 = 0
-    c2 = 0
-    for idx, i_shp in enumerate(where(mask_return)[0]):        
-        d1 = c1 + (n_channels[idx] * lengths[idx])
-        d2 = c2 + n_channels[idx]
-        
-        mask_values[c1:d1] = values[a1[i_shp]:a1[i_shp+1]]
-        mask_channel_ids[c2:d2] = channel_ids[a2[i_shp]:a2[i_shp+1]]
-        
-        c1 = d1
-        c2 = d2
-    
+    # id_samples를 함께 반환
     return (
-        mask_values,
-        lengths,
-        dilations[mask_return],
-        threshold[mask_return],
-        normalize[mask_return],
-        n_channels,
-        mask_channel_ids,
-        mask_id_samples  # **id_sample 추가**
-    )
+        values, lengths, dilations, threshold, normalize, n_channels, channel_ids
+    ), id_samples
+    
 
 @njit(cache=__USE_NUMBA_CACHE__, parallel=__USE_NUMBA_PARALLEL__, fastmath=__USE_NUMBA_FASTMATH__, nogil=__USE_NUMBA_NOGIL__)
 def M_SL_apply_all_shapelets(
