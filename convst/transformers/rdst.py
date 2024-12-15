@@ -231,26 +231,26 @@ class R_DST(BaseEstimator, TransformerMixin):
         shapelet_lengths, seed = self._check_params(self.min_len)
         # Generate the shapelets
         if self.transform_type == STR_UNIVARIATE_VARIABLE:
-            self.shapelets_, self.id_samples_ = self.fitter(
+            self.shapelets_, self.id_samples_, self.start_positions_ = self.fitter(
                 X, y, self.n_shapelets, shapelet_lengths, seed, self.proba_norm,
                 self.percentiles[0], self.percentiles[1], self.alpha,
                 self.phase_invariance, self.min_len, X_len, self.prime_dilations
             )
         elif self.transform_type == STR_MULTIVARIATE_VARIABLE:
-            self.shapelets_, self.id_samples_ = self.fitter(
+            self.shapelets_, self.id_samples_, self.start_positions_ = self.fitter(
                 X, y, self.n_shapelets, shapelet_lengths, seed, self.proba_norm,
                 self.percentiles[0], self.percentiles[1], self.alpha,
                 self.phase_invariance, self.max_channels, self.min_len, X_len,
                 self.prime_dilations
             )
         elif self.transform_type == STR_MUTLIVARIATE:
-            self.shapelets_, self.id_samples_ = self.fitter(
+            self.shapelets_, self.id_samples_, self.start_positions_ = self.fitter(
                 X, y, self.n_shapelets, shapelet_lengths, seed, self.proba_norm,
                 self.percentiles[0], self.percentiles[1], self.alpha, 
                 self.phase_invariance, self.max_channels, self.prime_dilations
             )
         elif self.transform_type == STR_UNIVARIATE:
-            self.shapelets_, self.id_samples_ = self.fitter(
+            self.shapelets_, self.id_samples_, self.start_positions_ = self.fitter(
                 X, y, self.n_shapelets, shapelet_lengths, seed, self.proba_norm,
                 self.percentiles[0], self.percentiles[1], self.alpha, 
                 self.phase_invariance, self.prime_dilations

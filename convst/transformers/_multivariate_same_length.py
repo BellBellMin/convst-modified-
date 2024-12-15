@@ -109,18 +109,19 @@ def M_SL_generate_shapelet(
     use_phase, max_channels, prime_scheme
 ):
     """
-    Generate shapelets and record which instance (id_samples) each shapelet comes from.
+    Shapelet을 생성하고 각 shapelet이 추출된 instance와 시작 위치(start position)를 기록합니다.
     """
     n_samples, n_features, n_timestamps = X.shape
     seed(r_seed)
 
-    # Shapelet initialization
+    # Shapelet 초기화
     values, lengths, dilations, threshold, normalize, n_channels, channel_ids = \
         M_SL_init_random_shapelet_params(
             n_shapelets, shapelet_sizes, n_timestamps, p_norm, max_channels, prime_scheme
         )
-    
-    id_samples = np.zeros(n_shapelets, dtype=np.int64)  # Shapelet 생성 시 instance 기록
+
+    id_samples = np.zeros(n_shapelets, dtype=np.int64)  # shapelet이 뽑힌 instance 인덱스
+    start_positions = np.zeros(n_shapelets, dtype=np.int64)  # 시작 위치 기록
 
     unique_dil = unique(dilations)
     mask_sampling = ones((2, unique_dil.shape[0], n_samples, n_features, n_timestamps), dtype=bool_)
@@ -141,12 +142,15 @@ def M_SL_generate_shapelet(
             d_shape = n_timestamps if use_phase else n_timestamps - (_length - 1) * _dilation
             mask_dil = mask_sampling[norm, i_d]
 
+            # 가능한 sampling 위치 선택
             i_mask = where(mask_dil[:, :, :d_shape].sum(axis=1) >= _n_channels * alpha)
             if i_mask[0].shape[0] > 0:
-                id_sample = choice(i_mask[0])  # 선택된 샘플 기록
+                id_sample = choice(i_mask[0])  # 선택된 instance
                 id_samples[i_shp] = id_sample
 
-                index = choice(i_mask[1][i_mask[0] == id_sample])
+                start_position = choice(i_mask[1][i_mask[0] == id_sample])  # 시작 위치 선택
+                start_positions[i_shp] = start_position  # 시작 위치 기록
+
                 _values = zeros(_n_channels * _length)
                 _channel_ids = choice(arange(0, n_features), _n_channels, replace=False)
                 a3 = 0
@@ -154,7 +158,7 @@ def M_SL_generate_shapelet(
                 for k in range(_n_channels):
                     b3 = a3 + _length
                     _v = get_subsequence(
-                        X[id_sample, _channel_ids[k]], index, _length, _dilation, norm, use_phase
+                        X[id_sample, _channel_ids[k]], start_position, _length, _dilation, norm, use_phase
                     )
                     _values[a3:b3] = _v
                     a3 = b3
@@ -162,10 +166,9 @@ def M_SL_generate_shapelet(
                 values[a1[i_shp]:a1[i_shp+1]] = _values
                 channel_ids[a2[i_shp]:a2[i_shp+1]] = _channel_ids
 
-    # id_samples를 함께 반환
     return (
         values, lengths, dilations, threshold, normalize, n_channels, channel_ids
-    ), id_samples
+    ), id_samples, start_positions
     
 
 @njit(cache=__USE_NUMBA_CACHE__, parallel=__USE_NUMBA_PARALLEL__, fastmath=__USE_NUMBA_FASTMATH__, nogil=__USE_NUMBA_NOGIL__)
